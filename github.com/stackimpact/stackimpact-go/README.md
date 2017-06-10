@@ -2,9 +2,9 @@
 
 ## Overview
 
-StackImpact is a performance profiling and monitoring service for production Go applications. It gives developers continuous visibility with line-of-code precision into application performance, such as CPU, memory and I/O hot spots as well execution bottlenecks, allowing developers to optimize applications and troubleshoot issues before they impact customers. Learn more at [stackimpact.com](https://stackimpact.com/).
+StackImpact is a performance profiling and monitoring service for production applications. It gives developers continuous visibility with line-of-code precision into application performance, such as CPU, memory and I/O hot spots as well execution bottlenecks, allowing developers to optimize applications and troubleshoot issues before they impact customers. Learn more at [stackimpact.com](https://stackimpact.com/).
 
-
+![dashboard](https://stackimpact.com/wp-content/uploads/2017/05/hotspots-cpu-1.4.png)
 
 #### Features
 
@@ -12,7 +12,7 @@ StackImpact is a performance profiling and monitoring service for production Go 
 * Automatic bottleneck tracing for HTTP handlers and HTTP clients.
 * Error and panic monitoring.
 * Health monitoring including CPU, memory, garbage collection and other runtime metrics.
-* Alerts on hot spot anomalies.
+* Anomaly alerts on most important metrics.
 * Multiple account users for team collaboration.
 
 Learn more on the [features](https://stackimpact.com/features/) page (with screenshots).
@@ -53,8 +53,7 @@ And import the package `github.com/stackimpact/stackimpact-go` in your applicati
 Start the agent by specifying the agent key and application name. The agent key can be found in your account's Configuration section.
 
 ```go
-agent := stackimpact.NewAgent();
-agent.Start(stackimpact.Options{
+agent := stackimpact.Start(stackimpact.Options{
 	AgentKey: "agent key here",
 	AppName: "MyGoApp",
 })
@@ -64,6 +63,7 @@ Other initialization options:
 * `AppVersion` (Optional) Sets application version, which can be used to associate profiling information with the source code release.
 * `AppEnvironment` (Optional) Used to differentiate applications in different environments.
 * `HostName` (Optional) By default, host name will be the OS hostname.
+* `ProxyAddress` (Optional) Proxy server URL to use when connecting to the Dashboard servers.
 * `Debug` (Optional) Enables debug logging.
 
 
@@ -84,8 +84,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	agent := stackimpact.NewAgent()
-	agent.Start(stackimpact.Options{
+	agent := stackimpact.Start(stackimpact.Options{
 		AgentKey: "agent key here",
 		AppName: "Basic Go Server",
 		AppVersion: "1.0.0",
