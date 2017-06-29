@@ -5,35 +5,36 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"time"
 
 	"github.com/stackimpact/stackimpact-go/internal/pprof/profile"
 )
 
 type CPUReporter struct {
-	agent           *Agent
-	profilerTrigger *ProfilerTrigger
+	agent             *Agent
+	profilerScheduler *ProfilerScheduler
+	profile           *BreakdownNode
+	profileDuration   int64
 }
 
 func newCPUReporter(agent *Agent) *CPUReporter {
 	cr := &CPUReporter{
-		agent:           agent,
-		profilerTrigger: nil,
+		agent:             agent,
+		profilerScheduler: nil,
+		profile:           nil,
+		profileDuration:   0,
 	}
 
-	baseCpuTime, _ := readCPUTime()
-	cr.profilerTrigger = newProfilerTrigger(agent, 45, 300,
-		func() map[string]float64 {
-			cpuTime, _ := readCPUTime()
-			cpuUsage := float64(cpuTime - baseCpuTime)
-			baseCpuTime = cpuTime
-			return map[string]float64{"cpu-usage": cpuUsage}
+	cr.profilerScheduler = newProfilerScheduler(agent, 10000, 2000, 120000,
+		func(duration int64) {
+			cr.record(duration)
 		},
-		func(trigger string) {
-			cr.agent.log("CPU report triggered by reporting strategy, trigger=%v", trigger)
-			cr.report(trigger)
+		func() {
+			cr.report()
 		},
 	)
 
@@ -41,16 +42,22 @@ func newCPUReporter(agent *Agent) *CPUReporter {
 }
 
 func (cr *CPUReporter) start() {
-	cr.profilerTrigger.start()
+	cr.reset()
+	cr.profilerScheduler.start()
 }
 
-func (cr *CPUReporter) report(trigger string) {
+func (cr *CPUReporter) reset() {
+	cr.profile = newBreakdownNode("root")
+	cr.profileDuration = 0
+}
+
+func (cr *CPUReporter) record(duration int64) {
 	if cr.agent.config.isProfilingDisabled() {
 		return
 	}
 
-	cr.agent.log("Starting CPU profiler for 5000 milliseconds...")
-	p, e := cr.readCPUProfile(5000)
+	cr.agent.log("Starting CPU profiler.")
+	p, e := cr.readCPUProfile(duration)
 	if e != nil {
 		cr.agent.error(e)
 		return
@@ -60,55 +67,57 @@ func (cr *CPUReporter) report(trigger string) {
 	}
 	cr.agent.log("CPU profiler stopped.")
 
-	if callGraph, err := cr.createCPUCallGraph(p); err != nil {
+	if err := cr.updateCPUProfile(p); err != nil {
 		cr.agent.error(err)
-	} else {
-		// filter calls with lower than 1% CPU stake
-		callGraph.filter(2, 1, 100)
-
-		metric := newMetric(cr.agent, TypeProfile, CategoryCPUProfile, NameCPUUsage, UnitPercent)
-		metric.createMeasurement(trigger, callGraph.measurement, callGraph)
-		cr.agent.messageQueue.addMessage("metric", metric.toMap())
 	}
+
+	cr.profileDuration += duration
 }
 
-func (cr *CPUReporter) createCPUCallGraph(p *profile.Profile) (*BreakdownNode, error) {
-	// find "samples" type index
-	typeIndex := -1
+func (cr *CPUReporter) report() {
+	if cr.agent.config.isProfilingDisabled() {
+		return
+	}
+
+	cr.profile.convertToPercentage(float64(cr.profileDuration * 1e6 * int64(runtime.NumCPU())))
+
+	// filter calls with lower than 1% CPU stake
+	cr.profile.filter(2, 1, 100)
+
+	metric := newMetric(cr.agent, TypeProfile, CategoryCPUProfile, NameCPUUsage, UnitPercent)
+	metric.createMeasurement(TriggerTimer, cr.profile.measurement, 0, cr.profile)
+	cr.agent.messageQueue.addMessage("metric", metric.toMap())
+
+	cr.reset()
+}
+
+func (cr *CPUReporter) updateCPUProfile(p *profile.Profile) error {
+	samplesIndex := -1
+	cpuIndex := -1
 	for i, s := range p.SampleType {
 		if s.Type == "samples" {
-			typeIndex = i
-
-			break
+			samplesIndex = i
+		} else if s.Type == "cpu" {
+			cpuIndex = i
 		}
 	}
 
-	if typeIndex == -1 {
-		return nil, errors.New("Unrecognized profile data")
-	}
-
-	// calculate total possible samples
-	var maxSamples int64
-	if pt := p.PeriodType; pt != nil && pt.Type == "cpu" && pt.Unit == "nanoseconds" {
-		maxSamples = (p.DurationNanos / p.Period) * int64(runtime.NumCPU())
-	} else {
-		return nil, errors.New("No period information in profile")
+	if samplesIndex == -1 || cpuIndex == -1 {
+		return errors.New("Unrecognized profile data")
 	}
 
 	// build call graph
-	rootNode := newBreakdownNode("root")
-
 	for _, s := range p.Sample {
-		if len(s.Value) <= typeIndex {
-			cr.agent.log("Possible inconsistence in profile types and measurements")
+		if !cr.agent.ProfileAgent && isAgentStack(s) {
 			continue
 		}
 
-		stackSamples := s.Value[typeIndex]
-		stackPercent := float64(stackSamples) / float64(maxSamples) * 100
-		rootNode.increment(stackPercent, stackSamples)
+		stackSamples := s.Value[samplesIndex]
+		stackDuration := float64(s.Value[cpuIndex])
 
-		currentNode := rootNode
+		cr.profile.increment(stackDuration, stackSamples)
+
+		currentNode := cr.profile
 		for i := len(s.Location) - 1; i >= 0; i-- {
 			l := s.Location[i]
 			funcName, fileName, fileLine := readFuncInfo(l)
@@ -119,11 +128,11 @@ func (cr *CPUReporter) createCPUCallGraph(p *profile.Profile) (*BreakdownNode, e
 
 			frameName := fmt.Sprintf("%v (%v:%v)", funcName, fileName, fileLine)
 			currentNode = currentNode.findOrAddChild(frameName)
-			currentNode.increment(stackPercent, stackSamples)
+			currentNode.increment(stackDuration, stackSamples)
 		}
 	}
 
-	return rootNode, nil
+	return nil
 }
 
 func (cr *CPUReporter) readCPUProfile(duration int64) (*profile.Profile, error) {
@@ -213,6 +222,26 @@ func symbolizeProfile(p *profile.Profile) error {
 	}
 
 	return nil
+}
+
+var agentPath = filepath.Join("github.com", "stackimpact", "stackimpact-go", "internal")
+
+func isAgentStack(sample *profile.Sample) bool {
+	return stackContains(sample, "", agentPath)
+}
+
+func stackContains(sample *profile.Sample, funcNameTest string, fileNameTest string) bool {
+	for i := len(sample.Location) - 1; i >= 0; i-- {
+		l := sample.Location[i]
+		funcName, fileName, _ := readFuncInfo(l)
+
+		if (funcNameTest == "" || strings.Contains(funcName, funcNameTest)) &&
+			(fileNameTest == "" || strings.Contains(fileName, fileNameTest)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func readFuncInfo(l *profile.Location) (funcName string, fileName string, fileLine int64) {
