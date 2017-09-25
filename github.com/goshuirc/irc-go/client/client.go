@@ -26,9 +26,10 @@ type ServerConnection struct {
 	Casemapping ircmap.MappingType
 
 	// internal stuff
-	RawConnection net.Conn
-	eventsIn      eventmgr.EventManager
-	eventsOut     eventmgr.EventManager
+	RawConnection  net.Conn
+	eventsIn       eventmgr.EventManager
+	eventsOut      eventmgr.EventManager
+	channelsToJoin []channel
 
 	// data we keep track of
 	Features ServerFeatures
@@ -57,7 +58,7 @@ func newServerConnection(name string) *ServerConnection {
 	sc.Features = make(ServerFeatures)
 
 	sc.Caps.AddWantedCaps("account-notify", "away-notify", "extended-join", "multi-prefix", "sasl")
-	sc.Caps.AddWantedCaps("account-tag", "cap-notify", "chghost", "echo-message", "invite-notify", "server-time", "userhost-in-names")
+	sc.Caps.AddWantedCaps("account-tag", "cap-notify", "chghost", "invite-notify", "server-time", "userhost-in-names")
 
 	sc.Features.Parse("CHANTYPES=#", "LINELEN=512", "PREFIX=(ov)@+")
 
@@ -95,10 +96,27 @@ func (sc *ServerConnection) Connect(address string, ssl bool, tlsconfig *tls.Con
 	return nil
 }
 
+// JoinChannel joins a channel, or marks the channel as to be joined after registration.
+func (sc *ServerConnection) JoinChannel(name string, key string, useKey bool) {
+	if sc.Registered {
+		params := []string{name}
+		if useKey {
+			params = []string{name, key}
+		}
+		sc.Send(nil, "", "JOIN", params...)
+	} else {
+		sc.channelsToJoin = append(sc.channelsToJoin, channel{
+			Name:   name,
+			Key:    key,
+			UseKey: useKey,
+		})
+	}
+}
+
 // WaitForConnection waits for the serverConnection to become available.
 // This is used when writing a custom event loop.
 func (sc *ServerConnection) WaitForConnection() {
-	waitTime, _ := time.ParseDuration("10ms")
+	waitTime := 10 * time.Millisecond
 	for sc.RawConnection == nil {
 		time.Sleep(waitTime)
 	}
@@ -219,8 +237,8 @@ func (sc *ServerConnection) Casefold(message string) (string, error) {
 // Send sends an IRC message to the server. If the message cannot be converted
 // to a raw IRC line, an error is returned.
 func (sc *ServerConnection) Send(tags *map[string]ircmsg.TagValue, prefix string, command string, params ...string) error {
-	ircmsg := ircmsg.MakeMessage(tags, prefix, command, params...)
-	line, err := ircmsg.Line()
+	msg := ircmsg.MakeMessage(tags, prefix, command, params...)
+	line, err := msg.Line()
 	if err != nil {
 		return err
 	}
@@ -233,11 +251,18 @@ func (sc *ServerConnection) Send(tags *map[string]ircmsg.TagValue, prefix string
 	info["data"] = line
 	sc.dispatchRawOut(info)
 
+	var outTags map[string]ircmsg.TagValue
+	if tags == nil {
+		outTags = *ircmsg.MakeTags()
+	} else {
+		outTags = *tags
+	}
+
 	// dispatch real event
 	info = eventmgr.NewInfoMap()
 	info["server"] = sc
 	info["direction"] = "out"
-	info["tags"] = tags
+	info["tags"] = outTags
 	info["prefix"] = prefix
 	info["command"] = command
 	info["params"] = params
@@ -268,4 +293,10 @@ func (sc *ServerConnection) dispatchRawOut(info eventmgr.InfoMap) {
 func (sc *ServerConnection) dispatchOut(name string, info eventmgr.InfoMap) {
 	sc.eventsOut.Dispatch(name, info)
 	sc.eventsOut.Dispatch("all", info)
+}
+
+// IsChannel returns true if the given target is a channel.
+func (sc *ServerConnection) IsChannel(target string) bool {
+	channelChars := sc.Features["CHANTYPES"].(string)
+	return strings.ContainsAny(string(target[0]), channelChars)
 }
