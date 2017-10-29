@@ -12,19 +12,23 @@ const ErrorGroupUnrecoveredPanics string = "Unrecovered panics"
 const ErrorGroupHandledExceptions string = "Handled exceptions"
 
 type Options struct {
-	DashboardAddress string
-	ProxyAddress     string
-	AgentKey         string
-	AppName          string
-	AppVersion       string
-	AppEnvironment   string
-	HostName         string
-	Debug            bool
-	ProfileAgent     bool
+	DashboardAddress     string
+	ProxyAddress         string
+	AgentKey             string
+	AppName              string
+	AppVersion           string
+	AppEnvironment       string
+	HostName             string
+	DisableAutoProfiling bool
+	Standalone           bool
+	Debug                bool
+	ProfileAgent         bool
 }
 
 type Agent struct {
 	internalAgent *internal.Agent
+
+	spanStarted int32
 
 	// compatibility < 1.2.0
 	DashboardAddress string
@@ -38,6 +42,7 @@ type Agent struct {
 func NewAgent() *Agent {
 	a := &Agent{
 		internalAgent: internal.NewAgent(),
+		spanStarted:   0,
 	}
 
 	return a
@@ -78,6 +83,10 @@ func (a *Agent) Start(options Options) {
 		a.internalAgent.HostName = options.HostName
 	}
 
+	if options.DisableAutoProfiling {
+		a.internalAgent.AutoProfiling = false
+	}
+
 	if options.DashboardAddress != "" {
 		a.internalAgent.DashboardAddress = options.DashboardAddress
 	}
@@ -87,11 +96,11 @@ func (a *Agent) Start(options Options) {
 	}
 
 	if options.Debug {
-		a.internalAgent.Debug = options.Debug
+		a.internalAgent.Debug = true
 	}
 
 	if options.ProfileAgent {
-		a.internalAgent.ProfileAgent = options.ProfileAgent
+		a.internalAgent.ProfileAgent = true
 	}
 
 	a.internalAgent.Start()
@@ -105,6 +114,40 @@ func (a *Agent) Configure(agentKey string, appName string) {
 		HostName:         a.HostName,
 		DashboardAddress: a.DashboardAddress,
 		Debug:            a.Debug,
+	})
+}
+
+// Use this method to instruct the agent to start and stop
+// profiling. It does not guarantee that any profiler will be
+// started. The decision is made by the agent based on the
+// overhead constraints. The method returns Span object, on
+// which the Stop() method should be called.
+func (a *Agent) Profile() *Span {
+	s := newSpan(a)
+	s.start()
+
+	return s
+}
+
+// A helper function to profile HTTP handler function execution
+// by wrapping http.HandleFunc method parameters.
+func (a *Agent) ProfileHandlerFunc(pattern string, handlerFunc func(http.ResponseWriter, *http.Request)) (string, func(http.ResponseWriter, *http.Request)) {
+	return pattern, func(w http.ResponseWriter, r *http.Request) {
+		span := a.Profile()
+		defer span.Stop()
+
+		handlerFunc(w, r)
+	}
+}
+
+// A helper function to profile HTTP handler execution
+// by wrapping http.Handle method parameters.
+func (a *Agent) ProfileHandler(pattern string, handler http.Handler) (string, http.Handler) {
+	return pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		span := a.Profile()
+		defer span.Stop()
+
+		handler.ServeHTTP(w, r)
 	})
 }
 
@@ -161,4 +204,9 @@ func (a *Agent) RecordAndRecoverPanic() {
 	if err := recover(); err != nil {
 		a.internalAgent.RecordError(ErrorGroupRecoveredPanics, err, 1)
 	}
+}
+
+// Returns reported metrics in standalone mode.
+func (a *Agent) ReadMetrics() []interface{} {
+	return a.internalAgent.ReadMetrics()
 }
