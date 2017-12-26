@@ -62,13 +62,16 @@ agent := stackimpact.Start(stackimpact.Options{
 All initialization options:
 
 * `AgentKey` (Required) The access key for communication with the StackImpact servers.
-* `AppName` (Required) A name to identify and group application data. Typically, a single codebase, deployable unit or executable module corresponds to one application.
+* `AppName` (Required) A name to identify and group application data. Typically, a single codebase, deployable unit or executable module corresponds to one application. Sometimes also referred as a service.
 * `AppVersion` (Optional) Sets application version, which can be used to associate profiling information with the source code release.
 * `AppEnvironment` (Optional) Used to differentiate applications in different environments.
 * `HostName` (Optional) By default, host name will be the OS hostname.
 * `ProxyAddress` (Optional) Proxy server URL to use when connecting to the Dashboard servers.
-* `DisableAutoProfiling` (Optional) If set to `true`, disables the default automatic profiling and reporting. `agent.Profile()` should be used instead. Useful for environments without support for timers or background tasks.
+* `HTTPClient` (Optional) An `http.Client` instance to be used instead of the default client for reporting data to Dashboard servers.
+* `DisableAutoProfiling` (Optional) If set to `true`, disables the default automatic profiling and reporting. `agent.Profile()` and `agent.Report()` should be used instead. Useful for environments without support for timers or background tasks.
 * `Debug` (Optional) Enables debug logging.
+* `Logger` (Optional) A `log.Logger` instance to be used instead of default `STDOUT` logger.
+
 
 
 Example:
@@ -100,19 +103,18 @@ func main() {
 }
 ```
 
-#### Manual profiling
+#### Workload profiling
 
-*The use of manual profiling is optional.*
+*The use of workload profiling is optional.*
 
-Manual profiling is suitable for repeating code, such as request or event handlers. By default, the agent starts and stops profiling automatically. In order to make sure the agent profiles the most relevant execution intervals, the `agent.Profile()` method can be used.
+Workload profiling is suitable for repeating code, such as request or event handlers. By default, the agent starts and stops profiling automatically. In order to make sure the agent profiles the most relevant execution intervals, the `agent.Profile()` method can be used.
 
 ```go
 // Use this method to instruct the agent to start and stop 
 // profiling. It does not guarantee that any profiler will be 
 // started. The decision is made by the agent based on the 
 // overhead constraints. The method returns Span object, on 
-// which the Stop() method should be called.
-
+// which the Stop() method should be called. 
 span := agent.Profile();
 defer span.Stop();
 ```

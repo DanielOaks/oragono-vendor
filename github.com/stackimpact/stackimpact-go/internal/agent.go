@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -13,7 +15,7 @@ import (
 	"time"
 )
 
-const AgentVersion = "2.2.2"
+const AgentVersion = "2.3.2"
 const SAASDashboardAddress = "https://agent-api.stackimpact.com"
 
 var agentStarted bool = false
@@ -31,9 +33,9 @@ type Agent struct {
 	configLoader       *ConfigLoader
 	messageQueue       *MessageQueue
 	processReporter    *ProcessReporter
-	cpuReporter        *CPUReporter
-	allocationReporter *AllocationReporter
-	blockReporter      *BlockReporter
+	cpuReporter        *ProfileReporter
+	allocationReporter *ProfileReporter
+	blockReporter      *ProfileReporter
 	segmentReporter    *SegmentReporter
 	errorReporter      *ErrorReporter
 
@@ -48,9 +50,10 @@ type Agent struct {
 	AppEnvironment   string
 	HostName         string
 	AutoProfiling    bool
-	Standalone       bool
 	Debug            bool
+	Logger           *log.Logger
 	ProfileAgent     bool
+	HTTPClient       *http.Client
 }
 
 func NewAgent() *Agent {
@@ -83,9 +86,10 @@ func NewAgent() *Agent {
 		AppEnvironment:   "",
 		HostName:         "",
 		AutoProfiling:    true,
-		Standalone:       false,
 		Debug:            false,
+		Logger:           log.New(os.Stdout, "", 0),
 		ProfileAgent:     false,
+		HTTPClient:       nil,
 	}
 
 	a.buildId = a.calculateProgramSHA1()
@@ -96,9 +100,37 @@ func NewAgent() *Agent {
 	a.configLoader = newConfigLoader(a)
 	a.messageQueue = newMessageQueue(a)
 	a.processReporter = newProcessReporter(a)
-	a.cpuReporter = newCPUReporter(a)
-	a.allocationReporter = newAllocationReporter(a)
-	a.blockReporter = newBlockReporter(a)
+
+	cpuProfiler := newCPUProfiler(a)
+	cpuProfilerConfig := &ProfilerConfig{
+		logPrefix:          "CPU profiler",
+		maxProfileDuration: 20,
+		maxSpanDuration:    2,
+		maxSpanCount:       30,
+		spanInterval:       8,
+		reportInterval:     120,
+	}
+	a.cpuReporter = newProfileReporter(a, cpuProfiler, cpuProfilerConfig)
+
+	allocationProfiler := newAllocationProfiler(a)
+	allocationProfilerConfig := &ProfilerConfig{
+		logPrefix:      "Allocation profiler",
+		reportOnly:     true,
+		reportInterval: 120,
+	}
+	a.allocationReporter = newProfileReporter(a, allocationProfiler, allocationProfilerConfig)
+
+	blockProfiler := newBlockProfiler(a)
+	blockProfilerConfig := &ProfilerConfig{
+		logPrefix:          "Block profiler",
+		maxProfileDuration: 20,
+		maxSpanDuration:    4,
+		maxSpanCount:       30,
+		spanInterval:       16,
+		reportInterval:     120,
+	}
+	a.blockReporter = newProfileReporter(a, blockProfiler, blockProfilerConfig)
+
 	a.segmentReporter = newSegmentReporter(a)
 	a.errorReporter = newErrorReporter(a)
 
@@ -116,7 +148,12 @@ func (a *Agent) Start() {
 		if err != nil {
 			a.error(err)
 		}
-		a.HostName = hostName
+
+		if hostName != "" {
+			a.HostName = hostName
+		} else {
+			a.HostName = "unknown"
+		}
 	}
 
 	a.configLoader.start()
@@ -166,17 +203,6 @@ func (a *Agent) StopProfiling() {
 
 	a.cpuReporter.stopProfiling()
 	a.blockReporter.stopProfiling()
-
-	if !a.AutoProfiling {
-		a.cpuReporter.report()
-		a.allocationReporter.report()
-		a.blockReporter.report()
-
-		if !a.Standalone {
-			a.messageQueue.flush()
-			a.configLoader.load()
-		}
-	}
 }
 
 func (a *Agent) RecordSegment(name string, duration float64) {
@@ -203,26 +229,23 @@ func (a *Agent) RecordError(group string, msg interface{}, skipFrames int) {
 	a.errorReporter.recordError(group, err, skipFrames+1)
 }
 
-func (a *Agent) ReadMetrics() []interface{} {
-	if !a.Standalone {
-		return make([]interface{}, 0)
+func (a *Agent) Report() {
+	defer a.recoverAndLog()
+
+	a.configLoader.load()
+
+	if !a.AutoProfiling {
+		a.cpuReporter.report()
+		a.allocationReporter.report()
+		a.blockReporter.report()
+
+		a.messageQueue.flush()
 	}
-
-	messages := a.messageQueue.read()
-
-	metrics := make([]interface{}, 0)
-	for _, message := range messages {
-		if message.topic == "metric" {
-			metrics = append(metrics, message.content)
-		}
-	}
-
-	return metrics
 }
 
 func (a *Agent) log(format string, values ...interface{}) {
 	if a.Debug {
-		fmt.Printf("["+time.Now().Format(time.StampMilli)+"]"+
+		a.Logger.Printf("["+time.Now().Format(time.StampMilli)+"]"+
 			" StackImpact "+AgentVersion+": "+
 			format+"\n", values...)
 	}
@@ -230,9 +253,9 @@ func (a *Agent) log(format string, values ...interface{}) {
 
 func (a *Agent) error(err error) {
 	if a.Debug {
-		fmt.Println("[" + time.Now().Format(time.StampMilli) + "]" +
+		a.Logger.Println("[" + time.Now().Format(time.StampMilli) + "]" +
 			" StackImpact " + AgentVersion + ": Error")
-		fmt.Println(err)
+		a.Logger.Println(err)
 	}
 }
 

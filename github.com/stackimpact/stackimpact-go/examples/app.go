@@ -116,7 +116,7 @@ func simulateNetworkWait() {
 			fmt.Fprintf(w, "OK")
 		})
 
-		if err := http.ListenAndServe(":5000", nil); err != nil {
+		if err := http.ListenAndServe(":5002", nil); err != nil {
 			log.Fatal(err)
 			return
 		}
@@ -126,7 +126,7 @@ func simulateNetworkWait() {
 	for {
 		select {
 		case <-requestTicker.C:
-			res, err := http.Get("http://localhost:5000/test")
+			res, err := http.Get("http://localhost:5002/test")
 			if err == nil {
 				res.Body.Close()
 			}
@@ -178,10 +178,10 @@ func simulateLockWait() {
 	}
 }
 
-func simulateManualProfiling() {
+func simulateWorkloadProfiling() {
 	for {
 		span := agent.Profile()
-		fmt.Println("Manual profile started")
+		fmt.Println("Workload profile started")
 
 		// wait
 		time.Sleep(time.Duration(10+rand.Intn(10)) * time.Millisecond)
@@ -192,7 +192,7 @@ func simulateManualProfiling() {
 		}
 
 		span.Stop()
-		fmt.Println("Manual profile stopped")
+		fmt.Println("Workload profile stopped")
 
 		time.Sleep(20 * time.Second)
 	}
@@ -316,7 +316,7 @@ func main() {
 	go simulateNetworkWait()
 	go simulateSyscallWait()
 	go simulateLockWait()
-	go simulateManualProfiling()
+	go simulateWorkloadProfiling()
 	go simulateSegments()
 	go simulateHandlerSegments()
 	go simulateErrors()
