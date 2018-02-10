@@ -15,9 +15,6 @@ readers and a single writer. It supports custom indexes and geospatial
 data. It's ideal for projects that need a dependable database and favor 
 speed over data size.
 
-The desire to create BuntDB stems from the need for a new embeddable
-database for [Tile38](https://github.com/tidwall/tile38) and [SummitDB](https://github.com/tidwall/summitdb).
-
 Features
 ========
 
@@ -293,6 +290,20 @@ db.View(func(tx *buntdb.Tx) error {
 ```
 
 This will get all three positions.
+
+### k-Nearest Neighbors
+
+Use the `Nearby` function to get all the positions in order of nearest to farthest :
+
+```go
+db.View(func(tx *buntdb.Tx) error {
+    tx.Nearby("fleet", "[-113 33]", func(key, val string, dist float64) bool {
+    	...
+    	return true
+    })
+    return nil
+})
+```
 
 ### Spatial bracket syntax
 

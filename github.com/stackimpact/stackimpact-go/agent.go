@@ -166,10 +166,18 @@ func (a *Agent) Profile() *Span {
 // by wrapping http.HandleFunc method parameters.
 func (a *Agent) ProfileHandlerFunc(pattern string, handlerFunc func(http.ResponseWriter, *http.Request)) (string, func(http.ResponseWriter, *http.Request)) {
 	return pattern, func(w http.ResponseWriter, r *http.Request) {
-		span := a.Profile()
+		span := newSpan(a)
+		span.workload = pattern
+		span.start()
 		defer span.Stop()
 
-		handlerFunc(w, r)
+		if span.active {
+			WithPprofLabel("workload", pattern, r, func() {
+				handlerFunc(w, r)
+			})
+		} else {
+			handlerFunc(w, r)
+		}
 	}
 }
 
@@ -177,14 +185,22 @@ func (a *Agent) ProfileHandlerFunc(pattern string, handlerFunc func(http.Respons
 // by wrapping http.Handle method parameters.
 func (a *Agent) ProfileHandler(pattern string, handler http.Handler) (string, http.Handler) {
 	return pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		span := a.Profile()
+		span := newSpan(a)
+		span.workload = pattern
+		span.start()
 		defer span.Stop()
 
-		handler.ServeHTTP(w, r)
+		if span.active {
+			WithPprofLabel("workload", pattern, r, func() {
+				handler.ServeHTTP(w, r)
+			})
+		} else {
+			handler.ServeHTTP(w, r)
+		}
 	})
 }
 
-// Starts measurement of execution time of a code segment.
+// DEPRECATED. Starts measurement of execution time of a code segment.
 // To stop measurement call Stop on returned Segment object.
 // After calling Stop the segment is recorded, aggregated and
 // reported with regular intervals.
@@ -195,7 +211,7 @@ func (a *Agent) MeasureSegment(segmentName string) *Segment {
 	return s
 }
 
-// A helper function to measure HTTP handler function execution
+// DEPRECATED. A helper function to measure HTTP handler function execution
 // by wrapping http.HandleFunc method parameters.
 func (a *Agent) MeasureHandlerFunc(pattern string, handlerFunc func(http.ResponseWriter, *http.Request)) (string, func(http.ResponseWriter, *http.Request)) {
 	return pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +222,7 @@ func (a *Agent) MeasureHandlerFunc(pattern string, handlerFunc func(http.Respons
 	}
 }
 
-// A helper function to measure HTTP handler execution
+// DEPRECATED. A helper function to measure HTTP handler execution
 // by wrapping http.Handle method parameters.
 func (a *Agent) MeasureHandler(pattern string, handler http.Handler) (string, http.Handler) {
 	return pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

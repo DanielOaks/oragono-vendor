@@ -2,7 +2,7 @@
 
 ## Overview
 
-StackImpact is a performance profiler for production applications. It gives developers continuous and historical view of application performance with line-of-code precision, which includes CPU, memory allocation and blocking call hot spots as well as execution bottlenecks, errors and runtime metrics. Learn more at [stackimpact.com](https://stackimpact.com/).
+StackImpact is a production-grade performance profiler built for both production and development environments. It gives developers continuous and historical view of application performance with line-of-code precision that is essential for locating CPU, memory allocation and blocking call hot spots as well as latency bottlenecks. Included runtime metric and error monitoring complement profiles for extensive performance analysis. Learn more at [stackimpact.com](https://stackimpact.com/).
 
 ![dashboard](https://stackimpact.com/wp-content/uploads/2017/06/hotspots-cpu-1.4.png)
 
@@ -34,7 +34,7 @@ Linux, OS X or Windows. Go version 1.5+.
 
 #### Create StackImpact account
 
-[Sign up](https://dashboard.stackimpact.com/#/signup) for a free account (also with GitHub login).
+Sign up for a free trial account at [stackimpact.com](https://stackimpact.com) (also with GitHub login).
 
 
 #### Installing the agent
@@ -103,11 +103,11 @@ func main() {
 }
 ```
 
-#### Workload profiling
+#### Programmatic profiling
 
-*The use of workload profiling is optional.*
+*The use of programmatic profiling is optional.*
 
-Workload profiling is suitable for repeating code, such as request or event handlers. By default, the agent starts and stops profiling automatically. In order to make sure the agent profiles the most relevant execution intervals, the `agent.Profile()` method can be used.
+Programmatic profiling is suitable for repeating code, such as request or event handlers. By default, the agent starts and stops profiling automatically. In order to make sure the agent profiles the most relevant execution intervals, the `agent.Profile()` method can be used.
 
 ```go
 // Use this method to instruct the agent to start and stop 
@@ -135,39 +135,8 @@ pattern, wrappedHandler := agent.ProfileHandler(pattern, handler)
 pattern, wrappedHandlerFunc := agent.ProfileHandlerFunc(pattern, handlerFunc)
 ```
 
-#### Measuring code segments
 
-*The use of Segment API is optional.*
-
-To measure the execution time of arbitrary parts of the application, the Segment API can be used.
-
-```go
-// Starts measurement of execution time of a code segment.
-// To stop measurement, call Stop on returned Segment object.
-// After calling Stop, the segment is recorded, aggregated and
-// reported with regular intervals.
-segment := agent.MeasureSegment("Segment1")
-defer segment.Stop()
-```
-
-```go
-// A helper function to measure HTTP handler execution by wrapping 
-// http.Handle method parameters.
-// Usage example:
-//   http.Handle(agent.MeasureHandler("/some-path", someHandler))
-pattern, wrappedHandler := agent.MeasureHandler(pattern, handler)
-```
-
-```go
-// A helper function to measure HTTP handler function execution 
-// by wrapping http.HandleFunc method parameters.
-// Usage example:
-//   http.HandleFunc(agent.MeasureHandlerFunc("/some-path", someHandlerFunc))
-pattern, wrappedHandlerFunc := agent.MeasureHandlerFunc(pattern, handlerFunc)
-```
-
-
-#### Monitoring errors
+#### Error reporting
 
 *The use of Error API is optional.*
 
@@ -209,4 +178,4 @@ To enable debug logging, add `Debug: true` to startup options. If the debug log 
 
 ## Overhead
 
-The agent overhead is measured to be less than 1% for applications under high load. For applications that are horizontally scaled to multiple processes, StackImpact agents are only active on a small subset (adjustable) of the processes at any point of time, therefore the total overhead is much lower.
+The agent overhead is measured to be less than 1% for applications under high load. For applications that are horizontally scaled to multiple processes, StackImpact agents are only active on a small subset of the processes at any point of time, therefore the total overhead is much lower.
