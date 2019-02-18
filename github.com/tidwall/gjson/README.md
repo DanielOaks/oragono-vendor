@@ -5,7 +5,7 @@
 <br>
 <a href="https://travis-ci.org/tidwall/gjson"><img src="https://img.shields.io/travis/tidwall/gjson.svg?style=flat-square" alt="Build Status"></a>
 <a href="https://godoc.org/github.com/tidwall/gjson"><img src="https://img.shields.io/badge/api-reference-blue.svg?style=flat-square" alt="GoDoc"></a>
-<a href="http://tidwall.com/gjson-play"><img src="https://img.shields.io/badge/play-ground-orange.svg?style=flat-square" alt="GJSON Playground"></a>
+<a href="http://tidwall.com/gjson-play"><img src="https://img.shields.io/badge/%F0%9F%8F%90-playground-9900cc.svg?style=flat-square" alt="GJSON Playground"></a>
 </p>
 
 
@@ -13,7 +13,9 @@
 <p align="center">get json values quickly</a></p>
 
 GJSON is a Go package that provides a [fast](#performance) and [simple](#get-a-value) way to get values from a json document.
-It has features such as [one line retrieval](#get-a-value), [dot notation paths](#path-syntax), [iteration](#iterate-through-an-object-or-array).
+It has features such as [one line retrieval](#get-a-value), [dot notation paths](#path-syntax), [iteration](#iterate-through-an-object-or-array), and [parsing json lines](#json-lines).
+
+Also check out [SJSON](https://github.com/tidwall/sjson) for modifying json, and the [JJ](https://github.com/tidwall/jj) command line tool.
 
 Getting Started
 ===============
@@ -29,7 +31,7 @@ $ go get -u github.com/tidwall/gjson
 This will retrieve the library.
 
 ## Get a value
-Get searches json for the specified path. A path is in dot syntax, such as "name.last" or "age". This function expects that the json is well-formed. Bad json will not panic, but it may return back unexpected results. When the value is found it's returned immediately. 
+Get searches json for the specified path. A path is in dot syntax, such as "name.last" or "age". When the value is found it's returned immediately. 
 
 ```go
 package main
@@ -86,13 +88,14 @@ The dot and wildcard characters can be escaped with '\\'.
 ```
 
 You can also query an array for the first match by using `#[...]`, or find all matches with `#[...]#`. 
-Queries support the `==`, `!=`, `<`, `<=`, `>`, `>=` comparison operators and the simple pattern matching `%` operator.
+Queries support the `==`, `!=`, `<`, `<=`, `>`, `>=` comparison operators and the simple pattern matching `%` (like) and `!%` (not like) operators.
 
 ```
 friends.#[last=="Murphy"].first    >> "Dale"
 friends.#[last=="Murphy"]#.first   >> ["Dale","Jane"]
 friends.#[age>45]#.last            >> ["Craig","Murphy"]
 friends.#[first%"D*"].last         >> "Murphy"
+friends.#[first!%"D*"].last        >> "Craig"
 ```
 
 ## Result Type
@@ -150,6 +153,123 @@ string  >> string
 null    >> nil
 array   >> []interface{}
 object  >> map[string]interface{}
+```
+
+### 64-bit integers
+
+The `result.Int()` and `result.Uint()` calls are capable of reading all 64 bits, allowing for large JSON integers.
+
+```go
+result.Int() int64    // -9223372036854775808 to 9223372036854775807
+result.Uint() int64   // 0 to 18446744073709551615
+```
+
+## Modifiers and path chaining 
+
+New in version 1.2 is support for modifier functions and path chaining.
+
+A modifier is a path component that performs custom processing on the 
+json.
+
+Multiple paths can be "chained" together using the pipe character. 
+This is useful for getting results from a modified query.
+
+For example, using the built-in `@reverse` modifier on the above json document,
+we'll get `children` array and reverse the order:
+
+```
+"children|@reverse"           >> ["Jack","Alex","Sara"]
+"children|@reverse|#"         >> "Jack"
+```
+
+There are currently three built-in modifiers:
+
+- `@reverse`: Reverse an array or the members of an object.
+- `@ugly`: Remove all whitespace from a json document.
+- `@pretty`: Make the json document more human readable.
+
+### Modifier arguments
+
+A modifier may accept an optional argument. The argument can be a valid JSON 
+document or just characters.
+
+For example, the `@pretty` modifier takes a json object as its argument. 
+
+```
+@pretty:{"sortKeys":true} 
+```
+
+Which makes the json pretty and orders all of its keys.
+
+```json
+{
+  "age":37,
+  "children": ["Sara","Alex","Jack"],
+  "fav.movie": "Deer Hunter",
+  "friends": [
+    {"age": 44, "first": "Dale", "last": "Murphy"},
+    {"age": 68, "first": "Roger", "last": "Craig"},
+    {"age": 47, "first": "Jane", "last": "Murphy"}
+  ],
+  "name": {"first": "Tom", "last": "Anderson"}
+}
+```
+
+*The full list of `@pretty` options are `sortKeys`, `indent`, `prefix`, and `width`. 
+Please see [Pretty Options](https://github.com/tidwall/pretty#customized-output) for more information.*
+
+### Custom modifiers
+
+You can also add custom modifiers.
+
+For example, here we create a modifier that makes the entire json document upper
+or lower case.
+
+```go
+gjson.AddModifier("case", func(json, arg string) string {
+  if arg == "upper" {
+    return strings.ToUpper(json)
+  }
+  if arg == "lower" {
+    return strings.ToLower(json)
+  }
+  return json
+})
+```
+
+```
+"children|@case:upper"           >> ["SARA","ALEX","JACK"]
+"children|@case:lower|@reverse"  >> ["jack","alex","sara"]
+```
+
+## JSON Lines
+
+There's support for [JSON Lines](http://jsonlines.org/) using the `..` prefix, which treats a multilined document as an array. 
+
+For example:
+
+```
+{"name": "Gilbert", "age": 61}
+{"name": "Alexa", "age": 34}
+{"name": "May", "age": 57}
+{"name": "Deloise", "age": 44}
+```
+
+```
+..#                   >> 4
+..1                   >> {"name": "Alexa", "age": 34}
+..3                   >> {"name": "Deloise", "age": 44}
+..#.name              >> ["Gilbert","Alexa","May","Deloise"]
+..#[name="May"].age   >> 57
+```
+
+The `ForEachLines` function will iterate through JSON lines.
+
+```go
+gjson.ForEachLine(json, func(line gjson.Result) bool{
+    println(line.String())
+    return true
+})
 ```
 
 ## Get nested array values
@@ -232,6 +352,19 @@ if !value.Exists() {
 if gjson.Get(json, "name.last").Exists() {
 	println("has a last name")
 }
+```
+
+## Validate JSON
+
+The `Get*` and `Parse*` functions expects that the json is well-formed. Bad json will not panic, but it may return back unexpected results.
+
+If you are consuming JSON from an unpredictable source then you may want to validate prior to using GJSON.
+
+```go
+if !gjson.Valid(json) {
+	return errors.New("invalid json")
+}
+value := gjson.Get(json, "name.last")
 ```
 
 ## Unmarshal to a map
