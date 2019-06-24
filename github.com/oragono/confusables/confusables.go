@@ -13,13 +13,20 @@ import (
 // TODO: DOC you might want to store the Skeleton and check against it later
 // TODO: implement xidmodifications.txt restricted characters
 
+type lookupFunc func(rune) (string)
+
 func lookupReplacement(r rune) string {
 	return confusablesMap[r]
 }
 
-// Skeleton converts a string to it's "skeleton" form
-// as descibed in http://www.unicode.org/reports/tr39/#Confusable_Detection
-func Skeleton(s string) string {
+func lookupReplacementTweaked(r rune) string {
+	if replacement, ok := tweaksMap[r]; ok {
+		return replacement
+	}
+	return confusablesMap[r]
+}
+
+func skeletonBase(s string, lookup lookupFunc) string {
 
 	// 1. Converting X to NFD format
 	s = norm.NFD.String(s)
@@ -35,7 +42,7 @@ func Skeleton(s string) string {
 			buf.WriteString(s[prevPos:i])
 		}
 		prevPos = i
-		replacement = lookupReplacement(r)
+		replacement = lookup(r)
 		if replacement != "" {
 			if !changed {
 				changed = true
@@ -56,6 +63,18 @@ func Skeleton(s string) string {
 	s = norm.NFD.String(s)
 
 	return s
+}
+
+// Skeleton converts a string to its "skeleton" form
+// as described in http://www.unicode.org/reports/tr39/#Confusable_Detection
+func Skeleton(s string) string {
+	return skeletonBase(s, lookupReplacement)
+}
+
+// SkeletonTweaked is like Skeleton, but it implements some custom overrides
+// to the confusables table (currently it removes the m -> rn mapping):
+func SkeletonTweaked(s string) string {
+	return skeletonBase(s, lookupReplacementTweaked)
 }
 
 func Confusable(x, y string) bool {
