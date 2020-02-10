@@ -4,6 +4,11 @@ code.cloudfoundry.org/bytefmt
 # github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 ## explicit
 github.com/docopt/docopt-go
+# github.com/go-asn1-ber/asn1-ber v1.3.1
+github.com/go-asn1-ber/asn1-ber
+# github.com/go-ldap/ldap/v3 v3.1.6
+## explicit
+github.com/go-ldap/ldap/v3
 # github.com/goshuirc/e-nfa v0.0.0-20160917075329-7071788e3940
 ## explicit
 github.com/goshuirc/e-nfa
